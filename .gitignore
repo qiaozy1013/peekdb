@@ -1,0 +1,80 @@
+# --- Build artifacts ---
+/bin/
+/dist/
+/out/
+/peekdb
+/peekdb-mut
+/peekdb.exe
+/peekdb-mut.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# --- Go test cache (left over from an earlier Defender
+#     workaround; the current setup uses GOTMPDIR, see
+#     Taskfile.yml) ---
+/.gocache/
+
+# --- Test artifacts ---
+*.test
+*.out
+coverage.txt
+coverage.html
+*.coverprofile
+
+# --- Go workspace files ---
+go.work
+go.work.sum
+
+# --- Vendor (if used) ---
+/vendor/
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- OS files ---
+.DS_Store
+desktop.ini
+ehthumbs.db
+ehthumbs_vista.db
+.Trash-*
+
+# --- Logs and temp ---
+*.log
+*.tmp
+*.temp
+
+# --- Local config ---
+.env
+.env.local
+config.local.yaml
+config.local.toml
+
+# --- Generated docs ---
+/docs/_build/
+/docs/site/
+/public/
+
+# --- Real test data (NEVER commit) ---
+# Real Chrome History, VSCode state, etc.
+# Only mock data under testdata/ should be committed.
+/testdata/real/
+/testdata/.cache/
+/testdata/tmp/
+
+# --- TUI session temp files ---
+# Copy-on-open creates temp files; they should be cleaned up but just in case
+/tmp/peekdb-*/
+
+# --- Profiling ---
+*.prof
+*.pprof
+pprof.data
+.gotmp/

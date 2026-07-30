@@ -1,0 +1,44 @@
+# Git attributes for peekdb.
+
+# Normalize line endings for text files (force LF in the repo).
+*          text=auto eol=lf
+
+# Explicitly mark these as text.
+*.go        text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.txt       text eol=lf
+*.sh        text eol=lf
+Makefile    text eol=lf
+
+# Mark binary files explicitly.
+*.png       binary
+*.jpg       binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
+*.db        binary
+*.sqlite    binary
+*.sqlite3   binary
+*.bdb       binary
+*.ldb       binary
+*.exe       binary
+*.dll       binary
+*.so        binary
+*.dylib     binary
+
+# Test data files (binary).
+testdata/** binary
+
+# Go module files.
+go.mod      text eol=lf
+go.sum      text eol=lf
+
+# Exclude vendored dependencies from blame.
+vendor/     linguist-generated

@@ -1,0 +1,96 @@
+# golangci-lint v2 configuration for peekdb.
+# v2 docs: https://golangci-lint.run/product/migration-guide/
+# Install:  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.0.0
+# Run:      golangci-lint run
+# Auto-fix: golangci-lint run --fix
+
+version: "2"
+
+run:
+  # No timeout by default in v2; set a reasonable one.
+  timeout: 5m
+  # Run against test files too.
+  tests: true
+  # Match the oldest Go version we support (see go.mod).
+  go: "1.22"
+
+linters:
+  default: none
+  enable:
+    # --- correctness (must have) ---
+    - errcheck        # unchecked errors
+    - govet           # standard vet checks
+    - ineffassign     # unused assignments
+    - staticcheck     # gosimple + stylecheck + staticcheck combined
+    - unused          # unused variables/funcs
+
+    # --- Go 1.22+ modernisations ---
+    - copyloopvar     # Go 1.22 loop variable capture
+    - intrange        # for-range int optimisation
+
+    # --- quality ---
+    - gocritic        # opinionated style/bug checks
+    - gocyclo         # cyclomatic complexity (warn > 15)
+    - revive          # golint successor
+
+    # --- security ---
+    - gosec           # common security issues
+
+    # --- spelling ---
+    - misspell        # common misspellings (English)
+
+  settings:
+    gocyclo:
+      min-complexity: 15
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment   # too noisy for struct layout optimisation
+    revive:
+      rules:
+        - name: var-naming
+        - name: package-comments
+        - name: exported
+        - name: indent-error-flow
+        - name: errorf
+    gosec:
+      # G304 (file inclusion via variable) is a known pattern in CLI tools
+      # that legitimately open user-supplied paths. We log the path in
+      # errors and check permissions before opening.
+      excludes:
+        - G304
+    misspell:
+      locale: US
+
+  exclusions:
+    # Test files may legitimately ignore certain patterns.
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocyclo
+      # Test data should not be linted.
+      - path: testdata/
+        linters:
+          - all
+    warn-unused: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: github.com/qiaozy1013/peekdb
+  exclusions:
+    paths:
+      - testdata/
+
+output:
+  formats:
+    text:
+      path: stdout
+      colors: true
+  print-issued-lines: true
+  print-linter-name: true

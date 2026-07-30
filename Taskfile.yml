@@ -1,0 +1,189 @@
+# peekdb Taskfile
+# https://taskfile.dev
+#
+# Cross-platform task runner — works on Windows, macOS, Linux without GNU make.
+# Install:  go install github.com/go-task/task/v3/cmd/task@latest
+# Run:      task <name>            (or `task` for the default task)
+# List:     task --list
+
+version: '3'
+
+vars:
+  BINARY: peekdb
+  MUT_BINARY: peekdb-mut
+  PKG: ./...
+  GOLANGCI_LINT_VERSION: v2.0.0
+
+env:
+  CGO_ENABLED: '0'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # ---------- build ----------
+  build:
+    desc: Build the read-only peekdb binary (current platform)
+    cmds:
+      - 'go build -trimpath -ldflags="-s -w -X github.com/qiaozy1013/peekdb/internal/version.Version={{.VERSION}} -X github.com/qiaozy1013/peekdb/internal/version.Commit={{.COMMIT}} -X github.com/qiaozy1013/peekdb/internal/version.BuildTime={{.BUILD_TIME}}" -o ./dist/{{.BINARY}} ./cmd/peekdb && echo Built ./dist/{{.BINARY}}'
+    vars:
+      VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+      COMMIT:
+        sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+      BUILD_TIME: '{{now | date "2006-01-02T15:04:05Z"}}'
+
+  build-mut:
+    desc: Build the write-capable peekdb-mut binary (v2.0+, only)
+    cmds:
+      - 'go build -tags=write -trimpath -ldflags="-s -w -X github.com/qiaozy1013/peekdb/internal/version.Version={{.VERSION}} -X github.com/qiaozy1013/peekdb/internal/version.Commit={{.COMMIT}} -X github.com/qiaozy1013/peekdb/internal/version.BuildTime={{.BUILD_TIME}} -X github.com/qiaozy1013/peekdb/internal/version.BuildTags=write" -o ./dist/{{.MUT_BINARY}} ./cmd/peekdb && echo Built ./dist/{{.MUT_BINARY}}'
+    vars:
+      VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+      COMMIT:
+        sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+      BUILD_TIME: '{{now | date "2006-01-02T15:04:05Z"}}'
+
+  # ---------- test ----------
+  test:
+    desc: Run all tests (no -race, works without gcc on Windows)
+    # GOTMPDIR points to Go's own cache directory instead
+    # of the default %TEMP% because Windows Defender's
+    # heuristic scan of freshly-compiled test binaries
+    # races with the fork+exec and intermittently blocks
+    # them with "Access is denied". Go's default cache
+    # directory (%LOCALAPPDATA%\go-build) is on Defender's
+    # allow-list, so test binaries there run reliably.
+    # -p 1 serialises package builds so the Defender
+    # race is even less likely.
+    env:
+      GOTMPDIR: '{{.LOCALAPPDATA}}\go-build'
+    cmds:
+      - go test -count=1 -p 1 {{.PKG}}
+
+  test-race:
+    desc: Run all tests with -race (requires gcc; CI on Linux/macOS)
+    env:
+      CGO_ENABLED: '1'   # -race requires cgo
+    cmds:
+      - go test -race -count=1 {{.PKG}}
+
+  coverage:
+    desc: Run tests with coverage report (no -race, works everywhere)
+    cmds:
+      - go test -coverprofile=coverage.out {{.PKG}}
+      - go tool cover -func=coverage.out | tail -1
+      - go tool cover -html=coverage.out -o coverage.html
+      - cmd: echo Coverage report written to coverage.html
+
+  coverage-race:
+    desc: Run tests with coverage and -race (requires gcc)
+    env:
+      CGO_ENABLED: '1'
+    cmds:
+      - go test -race -coverprofile=coverage.out {{.PKG}}
+      - go tool cover -func=coverage.out | tail -1
+      - go tool cover -html=coverage.out -o coverage.html
+      - cmd: echo Coverage report written to coverage.html
+
+  test-integration:
+    desc: Run integration tests with the 'integration' build tag (no -race)
+    cmds:
+      - go test -tags=integration -count=1 {{.PKG}}
+
+  bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -bench=. -benchmem -run=^$ ./...
+
+  # ---------- quality ----------
+  fmt:
+    desc: Format code (gofmt)
+    cmds:
+      - go fmt {{.PKG}}
+      - gofmt -l -w .
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet {{.PKG}}
+
+  install-lint:
+    desc: Install golangci-lint v2 (idempotent)
+    status:
+      - command -v golangci-lint >/dev/null 2>&1
+    cmds:
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_LINT_VERSION}}
+      - echo "Installed golangci-lint {{.GOLANGCI_LINT_VERSION}}"
+
+  lint:
+    desc: Run golangci-lint v2
+    deps: [install-lint]
+    cmds:
+      - golangci-lint run
+
+  lint-fix:
+    desc: Run golangci-lint v2 with --fix
+    deps: [install-lint]
+    cmds:
+      - golangci-lint run --fix
+
+  tidy:
+    desc: Tidy and verify modules
+    cmds:
+      - go mod tidy
+      - go mod verify
+
+  check-readonly:
+    desc: Verify the default build contains no write APIs
+    cmds:
+      - go build -o ./dist/{{.BINARY}}-check.exe ./cmd/peekdb
+      - 'go run scripts/check-readonly.go ./dist/{{.BINARY}}-check.exe'
+
+  # ---------- test data ----------
+  testdata:
+    desc: Generate mock test data (testdata/gen/)
+    dir: testdata/gen
+    cmds:
+      - go run .
+
+  # ---------- release ----------
+  release-snapshot:
+    desc: Build all platforms via GoReleaser (no publish, no validate)
+    cmds:
+      - goreleaser release --snapshot --clean --skip=publish,validate
+
+  # ---------- env ----------
+  env:
+    desc: Verify the local development environment (Makefile-style)
+    cmds:
+      - echo "== Go toolchain =="
+      - go version
+      - echo "GOPROXY=$(go env GOPROXY)"
+      - echo "GOSUMDB=$(go env GOSUMDB)"
+      - echo ""
+      - echo "== Optional tools =="
+      - 'command -v gofmt          >/dev/null 2>&1 && echo "  [OK]    gofmt"        || echo "  [MISS]  gofmt"'
+      - 'command -v goimports      >/dev/null 2>&1 && echo "  [OK]    goimports"    || echo "  [MISS]  goimports"'
+      - 'command -v golangci-lint  >/dev/null 2>&1 && echo "  [OK]    golangci-lint"|| echo "  [MISS]  golangci-lint (run: task install-lint)"'
+      - 'command -v dlv            >/dev/null 2>&1 && echo "  [OK]    delve"        || echo "  [MISS]  delve"'
+      - 'command -v goreleaser     >/dev/null 2>&1 && echo "  [OK]    goreleaser"   || echo "  [MISS]  goreleaser"'
+      - echo ""
+      - echo "== Project sanity =="
+      - go vet {{.PKG}} && echo "  [OK]    go vet ./..." || echo "  [FAIL]  go vet"
+      - go build -o ./dist/peekdb-envcheck.exe ./cmd/peekdb && echo "  [OK]    go build ./cmd/peekdb" || echo "  [FAIL]  go build"
+
+  env-full:
+    desc: Verify local dev environment via the Windows PowerShell script
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-env.ps1
+
+  # ---------- cleanup ----------
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -f ./dist/{{.BINARY}}* ./dist/{{.MUT_BINARY}}* coverage.out coverage.html
+      - rm -f ./dist/peekdb-check.exe ./dist/peekdb-envcheck.exe
+      - echo "Cleaned"

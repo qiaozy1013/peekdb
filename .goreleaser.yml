@@ -1,0 +1,139 @@
+# GoReleaser configuration for peekdb.
+# Docs: https://goreleaser.com/
+
+# v0.1.0 ships a single read-only binary: `peekdb`.
+# The write-capable `peekdb-mut` binary lands in v2.0 (see docs/roadmap.md).
+# When v2.0 ships, add a second `builds` entry with `-tags=write` here.
+
+project_name: peekdb
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+    # Enforce the read-only invariant before publishing.
+    # The default build must not contain any write APIs.
+    - go run scripts/check-readonly.go ./dist/peekdb_Linux_x86_64_v0.1.0/peekdb
+
+builds:
+  - id: peekdb
+    main: ./cmd/peekdb
+    binary: peekdb
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/qiaozy1013/peekdb/internal/version.Version={{.Version}}
+      - -X github.com/qiaozy1013/peekdb/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/qiaozy1013/peekdb/internal/version.BuildTime={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+      - "386"
+    ignore:
+      - goos: windows
+        goarch: "386"
+      - goos: freebsd
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    builds:
+      - peekdb
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+    # Explicitly exclude test data from release archives.
+    exclude:
+      - 'testdata/**'
+
+nfpms:
+  - id: peekdb
+    package_name: peekdb
+    builds:
+      - peekdb
+    formats:
+      - deb
+      - rpm
+      - apk
+    maintainer: qiaozy1013
+    description: "Read-only TUI/CLI for browsing local database files"
+    license: MIT
+    section: utils
+    priority: optional
+    bindir: /usr/bin
+    contents:
+      - src: ./README.md
+        dst: /usr/share/doc/peekdb/README.md
+      - src: ./LICENSE
+        dst: /usr/share/doc/peekdb/LICENSE
+
+release:
+  github:
+    owner: qiaozy1013
+    name: peekdb
+  draft: true
+  prerelease: auto
+  name_template: "{{ .ProjectName }} v{{ .Version }}"
+  header: |
+    ## peekdb {{ .Tag }}
+
+    ### Install
+
+    ```
+    # Linux (deb/rpm/apk) — see Assets below
+    # Go install
+    go install github.com/qiaozy1013/peekdb/cmd/peekdb@{{ .Tag }}
+    ```
+
+    ### Verify the read-only invariant
+
+    ```
+    peekdb edit 2>&1 | grep "unknown command"  # must succeed
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/qiaozy1013/peekdb/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^style:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+  groups:
+    - title: "Features"
+      regexp: "^feat"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^fix"
+      order: 1
+    - title: "Performance"
+      regexp: "^perf"
+      order: 2
+    - title: "Refactoring"
+      regexp: "^refactor"
+      order: 3
+    - title: "Documentation"
+      regexp: "^docs"
+      order: 4
+    - title: "Others"
+      order: 999

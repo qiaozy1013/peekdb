@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch on new pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- test ----------
+  test:
+    name: test (${{ matrix.os }}, go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ["1.22", "1.23"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.22'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-go${{ matrix.go }}
+          path: coverage.out
+
+  # ---------- lint ----------
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: golangci-lint v2
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.0.0
+          args: --timeout=5m
+
+  # ---------- read-only invariant ----------
+  # CRITICAL: this is the primary security guarantee.
+  # The default peekdb build must not contain any write APIs.
+  readonly-check:
+    name: read-only invariant
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build default
+        run: go build -o /tmp/peekdb ./cmd/peekdb
+
+      - name: Verify 'write' command is not present
+        run: |
+          /tmp/peekdb write 2>&1 | grep -q "unknown command" || \
+            (echo "::error::'write' command must not exist in default build" && exit 1)
+
+      - name: Verify 'edit' command is not present
+        run: |
+          /tmp/peekdb edit 2>&1 | grep -q "unknown command" || \
+            (echo "::error::'edit' command must not exist in default build" && exit 1)
+
+      - name: Verify no write methods in inspector package
+        run: |
+          ! grep -rE "func .* Put\b" internal/inspector/ 2>/dev/null || \
+            (echo "::error::write method 'Put' found in inspector package" && exit 1)
+          ! grep -rE "func .* Delete\b" internal/inspector/ 2>/dev/null || \
+            (echo "::error::write method 'Delete' found in inspector package" && exit 1)
+          ! grep -rE "func .* Write\b" internal/inspector/ 2>/dev/null || \
+            (echo "::error::write method 'Write' found in inspector package" && exit 1)
+          echo "OK: default build is read-only"
+
+      - name: Build write build
+        run: go build -tags=write -o /tmp/peekdb-mut ./cmd/peekdb
+
+      - name: Verify write build contains the 'write' command
+        run: |
+          /tmp/peekdb-mut --help 2>&1 | head -5
+          echo "OK: write build compiles"
+
+  # ---------- cross-platform build smoke test ----------
+  cross-build:
+    name: cross build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build
+        env:
+          CGO_ENABLED: 0
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags="-s -w" -o peekdb-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/peekdb
+          ls -lh peekdb-${{ matrix.goos }}-${{ matrix.goarch }}* || true
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: peekdb-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: peekdb-${{ matrix.goos }}-${{ matrix.goarch }}*
