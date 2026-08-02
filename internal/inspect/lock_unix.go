@@ -51,12 +51,16 @@ func TryWriteLock(path string) LockState {
 		_ = syscall.Flock(fd, syscall.LOCK_UN)
 		return LockNone
 	}
-	// EWOULDBLOCK means another process holds a conflicting
-	// lock (typically EX; could also be SH on BSDs where
-	// LOCK_EX semantics differ).
+	// EWOULDBLOCK / EAGAIN mean another process holds a
+	// conflicting lock (typically EX; could also be SH on
+	// BSDs where LOCK_EX semantics differ). On Linux and
+	// macOS these are the same Errno value, so listing both
+	// as case labels would be a duplicate-case compile error
+	// (the build tags here exclude Windows, which is where
+	// EWOULDBLOCK and EAGAIN happen to differ). EAGAIN is
+	// the POSIX-standard name; use it.
 	if errno, ok := err.(syscall.Errno); ok {
-		switch errno {
-		case syscall.EWOULDBLOCK, syscall.EAGAIN:
+		if errno == syscall.EAGAIN {
 			return LockExclusive
 		}
 	}
