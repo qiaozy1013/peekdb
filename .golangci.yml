@@ -82,7 +82,9 @@ formatters:
     - goimports
   settings:
     goimports:
-      local-prefixes: github.com/qiaozy1013/peekdb
+      # v2.5.0 schema: local-prefixes must be an array, not a string.
+      local-prefixes:
+        - github.com/qiaozy1013/peekdb
   exclusions:
     paths:
       - testdata/
@@ -92,5 +94,5 @@ output:
     text:
       path: stdout
       colors: true
-  print-issued-lines: true
-  print-linter-name: true
+  # print-issued-lines and print-linter-name were valid in v2.0 but
+  # the v2.5.0 schema rejects them as additional properties.
