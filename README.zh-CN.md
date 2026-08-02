@@ -5,6 +5,8 @@
 
 [English](README.md) · [文档](docs/requirements.md)
 
+[![CI](https://github.com/qiaozy1013/peekdb/actions/workflows/ci.yml/badge.svg)](https://github.com/qiaozy1013/peekdb/actions/workflows/ci.yml)
+
 ## 安装
 
 ```bash
