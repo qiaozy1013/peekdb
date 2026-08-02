@@ -23,9 +23,9 @@ import (
 	"os"
 	"path/filepath"
 
-	bolt "go.etcd.io/bbolt"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	bolt "go.etcd.io/bbolt"
 )
 
 // testdataRoot is relative to the testdata/gen/ working directory.

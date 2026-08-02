@@ -7,7 +7,8 @@ import (
 // silentErr is the inspector package's shared helper for
 // best-effort probe failures ().
 //
-//  4 call sites in the inspector package that
+//	4 call sites in the inspector package that
+//
 // silently swallow errors with `_`:
 //
 //   - bbolt.go:94       Stats:     _ = b.db.View(...)

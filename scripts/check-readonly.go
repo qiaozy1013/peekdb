@@ -4,11 +4,13 @@
 // check-readonly.go — verifies the read-only invariant of the peekdb binary.
 //
 // Usage:
-//   go run scripts/check-readonly.go /path/to/peekdb
+//
+//	go run scripts/check-readonly.go /path/to/peekdb
 //
 // Exits 0 if the binary is read-only. Exits 1 otherwise, with a message on stderr.
 //
-//  (): the previous version had four
+//	(): the previous version had four
+//
 // coverage gaps:
 //
 //	(a) the subcommand probe only checked 2 of the 17 verbs
@@ -93,7 +95,7 @@ var writeVerbs = []string{
 // writeMethodPattern matches any Go function whose name starts
 // with one of the 22 write verbs. The pattern:
 //
-//   func .*\b(verb1|verb2|...)\b
+//	func .*\b(verb1|verb2|...)\b
 //
 // has no trailing \b, so it catches variants like PutBucket,
 // WriteBatch, DeleteBucket (which a contributor might add as

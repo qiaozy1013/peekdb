@@ -165,7 +165,7 @@ func Execute() int {
 // The list is checked in rootCmd.Args (parse-time), not in
 // runRoot, so the user gets a clear "unknown command" error
 // instead of cobra's generic "accepts at most 1 arg(s)"
-// message. 
+// message.
 // why; the  added the 5 missing verbs (put, set, add,
 // commit, rollback) to the table.
 //
@@ -198,7 +198,7 @@ var forbiddenArgNames = map[string]bool{
 	"load":     true,
 	"backup":   true,
 	"restore":  true,
-	// Added in 
+	// Added in
 	"put":      true,
 	"set":      true,
 	"add":      true,

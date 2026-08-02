@@ -38,7 +38,8 @@ import (
 // BoltInspector never writes. bbolt's ReadOnly flag plus
 // Tx.View make this a hard guarantee at the driver level.
 //
-//  Stats / Items / OpenItem all check the
+//	Stats / Items / OpenItem all check the
+//
 // `closed` flag (set once by Close) and return zero values if
 // the inspector is closed. The naive behavior — calling
 // bbolt's db.View after db.Close — panics with "database file
