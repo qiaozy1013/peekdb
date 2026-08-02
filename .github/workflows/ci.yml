@@ -67,7 +67,8 @@ jobs:
           cache: true
 
       - name: golangci-lint v2
-        uses: golangci/golangci-lint-action@v6
+        # v6 only supports golangci-lint v1. v2+ requires this action's v7.
+        uses: golangci/golangci-lint-action@v7
         with:
           # Pin to a minor so a future action update can't silently
           # break us. Bump manually when we want a newer linter.
