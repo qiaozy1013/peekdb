@@ -43,6 +43,12 @@ jobs:
         run: go vet ./...
 
       - name: go test
+        # Pin to bash on Windows too: the default `pwsh -Command ". '{0}'"`
+        # wrapper has a long-standing tokenization bug that splits strings
+        # like `coverage.out` at the `.` and feeds the trailing fragment
+        # to go test as a package path (see run #23: `FAIL .out [setup
+        # failed]`). bash is available on every github-hosted runner.
+        shell: bash
         run: go test -race -count=1 -coverprofile=coverage.out ./...
 
       - name: Upload coverage
