@@ -50,6 +50,11 @@ ehthumbs_vista.db
 *.log
 *.tmp
 *.temp
+# Keep LevelDB data files (e.g. 000001.log) — they look like logs but
+# are SSTable/memtable records. Without this, every leveldb fixture
+# directory would commit only CURRENT/LOCK/LOG/MANIFEST and the tests
+# would iterate over an empty database on CI runners.
+!/testdata/leveldb/**/*.log
 
 # --- Local config ---
 .env
