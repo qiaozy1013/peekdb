@@ -15,7 +15,11 @@ func repoRoot(t *testing.T) string {
 	t.Helper()
 	// This file lives at internal/detect/detect_test.go, so the repo
 	// root is two levels up.
-	abs, err := filepath.Abs("..\\..\\")
+	// filepath.Join is cross-platform (uses the OS separator);
+	// the previous hard-coded "..\\..\\" worked on Windows but
+	// Linux/macOS runners read the backslashes as literal chars
+	// and never reached the repo root.
+	abs, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("compute repo root: %v", err)
 	}
