@@ -10,7 +10,7 @@
 
 ## Tech stack (locked)
 
-- **Language**: Go 1.22+, **pure Go** (无 CGO)
+- **Language**: Go 1.25+, **pure Go** (无 CGO)
 - **TUI**: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [bubbles](https://github.com/charmbracelet/bubbles) + [lipgloss](https://github.com/charmbracelet/lipgloss)
 - **CLI**: [spf13/cobra](https://github.com/spf13/cobra)
 - **SQLite**: [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) (pure Go, no CGO)
