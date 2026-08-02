@@ -1,4 +1,9 @@
 version: 2
+# Cap concurrent PRs. Default is 5; we keep it low because weekly
+# cadence + grouped PRs makes 5+ trivial to hit, and unmerged PRs
+# rot.
+open-pull-requests-limit: 3
+
 updates:
   # Go modules
   - package-ecosystem: "gomod"
@@ -10,7 +15,8 @@ updates:
     labels:
       - "dependencies"
       - "go"
-    # Group patch updates into a single PR.
+    # Group minor + patch updates into a single PR. Major versions
+    # stay separate so they get individual review.
     groups:
       patch-dependencies:
         applies-to: version-updates
@@ -18,7 +24,9 @@ updates:
           - "minor"
           - "patch"
 
-  # GitHub Actions
+  # GitHub Actions — every action upgrade used to land as its own
+  # PR (PR #1 through #5 in the first week). Group them so we see
+  # one PR per ecosystem run, not five.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -28,3 +36,9 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+    groups:
+      actions-updates:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"

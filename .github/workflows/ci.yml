@@ -69,7 +69,9 @@ jobs:
       - name: golangci-lint v2
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.0.0
+          # Pin to a minor so a future action update can't silently
+          # break us. Bump manually when we want a newer linter.
+          version: v2.5.0
           args: --timeout=5m
 
   # ---------- read-only invariant ----------
