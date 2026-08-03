@@ -194,9 +194,9 @@ func relativeAge(t time.Time) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
-// renderHelp returns the help overlay text. D9.1 only
-// documents the keys that actually work; D9.2 will
-// extend the table when the remaining commands land.
+// renderHelp returns the help overlay text. D9.1 documents
+// the keys that work; v0.2.0 adds :search alongside the
+// pre-existing :refresh and :encoding.
 func renderHelp() string {
 	var b strings.Builder
 	b.WriteString("peekdb TUI help\n\n")
@@ -215,10 +215,13 @@ func renderHelp() string {
 	b.WriteString("  j / k        scroll one line\n")
 	b.WriteString("  g / G        top / bottom\n")
 	b.WriteString("  Esc  h       back to items\n\n")
-	b.WriteString("Commands (D9.1)\n")
+	b.WriteString("Commands (v0.2.0)\n")
 	b.WriteString("  :q            quit\n")
 	b.WriteString("  :help  :h     this help\n")
-	b.WriteString("\nD9.2 will add :refresh, :encoding, :search, :export.\n")
+	b.WriteString("  :refresh      re-stat the file (also: r)\n")
+	b.WriteString("  :encoding X   set text encoding override (utf-8, gbk, ...)\n")
+	b.WriteString("  :search P     substring search in current item (SQLite only)\n")
+	b.WriteString("\nD9.x will add :export.\n")
 	return b.String()
 }
 

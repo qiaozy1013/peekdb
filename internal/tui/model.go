@@ -363,6 +363,25 @@ func (m model) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		// Force a re-render of the content view so the new
 		// encoding takes effect immediately.
 		return m.refresh(), nil
+	case "search", "s":
+		// :search <pattern> — substring search in the
+		// currently-focused item (the content-view table
+		// if one is open, else the items-list cursor).
+		// Search is v0.2.0 M1a and currently SQLite-only.
+		if len(fields) < 2 {
+			m.err = fmt.Errorf("tui: :search needs a pattern (e.g. :search foo)")
+			return m, nil
+		}
+		// Join all trailing fields with single spaces so
+		// multi-word patterns work: :search hello world
+		// searches for "hello world", not just "hello".
+		pattern := strings.Join(fields[1:], " ")
+		name := m.searchTarget()
+		if name == "" {
+			m.err = fmt.Errorf("tui: :search: no item selected (open a table first)")
+			return m, nil
+		}
+		return m.runSearch(name, pattern)
 	default:
 		m.err = fmt.Errorf("tui: unknown command %q (supported: :q :help :refresh :encoding)", cmd)
 		return m, nil
@@ -437,6 +456,63 @@ func (m model) closeReader() model {
 	m.contentLines = nil
 	m.contentScroll = 0
 	return m
+}
+
+// searchTarget returns the name of the item the user is
+// currently looking at: the content-view table if one is
+// open, otherwise the items-list cursor. Returns "" when
+// neither is available (empty list).
+//
+// The "content-view first" precedence is what makes :search
+// inside an open table work without forcing the user to
+// close the table and re-select the same item.
+func (m model) searchTarget() string {
+	if m.currentName != "" {
+		return m.currentName
+	}
+	if m.cursor >= 0 && m.cursor < len(m.items) {
+		return m.items[m.cursor].Name
+	}
+	return ""
+}
+
+// runSearch runs a substring search on the named item and
+// renders the matching rows into the content view, replacing
+// whatever the user was previously looking at. The match
+// count is surfaced through the existing m.err slot (zero
+// struct growth, consistent with how :encoding-without-arg
+// shows the current value).
+//
+// Search is currently SQLite-only — Format() in the message
+// is the only way to hint at the limitation. M1c/M1d add
+// bbolt/LevelDB substring scan.
+func (m model) runSearch(name, pattern string) (tea.Model, tea.Cmd) {
+	sqlInsp, ok := m.ins.(*inspector.SQLiteInspector)
+	if !ok {
+		m.err = fmt.Errorf("tui: :search: only implemented for SQLite in v0.2.0 (format = %s)", m.ins.Format())
+		return m, nil
+	}
+	reader, err := sqlInsp.Search(name, pattern)
+	if err != nil {
+		m.err = err
+		return m, nil
+	}
+	lines, err := readAllRows(reader)
+	if err != nil {
+		_ = reader.Close()
+		m.err = err
+		return m, nil
+	}
+	_ = reader.Close()
+	m.currentName = name
+	m.contentLines = lines
+	m.contentScroll = 0
+	if len(lines) == 0 {
+		m.err = fmt.Errorf("tui: matched 0 rows in %q for %q", name, pattern)
+	} else {
+		m.err = fmt.Errorf("tui: matched %d rows in %q for %q", len(lines), name, pattern)
+	}
+	return m, nil
 }
 
 // readAllRows reads every row from r and renders it as a
