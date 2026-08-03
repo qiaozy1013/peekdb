@@ -7,13 +7,18 @@
 
 project_name: peekdb
 
-before:
-  hooks:
-    - go mod tidy
-    - go mod verify
-    # Enforce the read-only invariant before publishing.
-    # The default build must not contain any write APIs.
-    - go run scripts/check-readonly.go ./dist/peekdb_Linux_x86_64_v0.1.0/peekdb
+# Read-only invariant is enforced by the dedicated `readonly-check` job
+# in ci.yml, which already builds a binary and probes every write verb.
+# Repeating it here in goreleaser `before.hooks` is unnecessary — and was
+# a misconfiguration anyway: the hook runs BEFORE the archive is built,
+# so the path it referenced (./dist/peekdb_Linux_x86_64_v0.1.0/peekdb)
+# did not exist yet, and the script always exited 1.
+#
+# before:
+#   hooks:
+#     - go mod tidy
+#     - go mod verify
+#     - go run scripts/check-readonly.go ./dist/peekdb_Linux_x86_64_v0.1.0/peekdb
 
 builds:
   - id: peekdb
