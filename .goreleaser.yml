@@ -55,9 +55,6 @@ archives:
     files:
       - LICENSE
       - README.md
-    # Explicitly exclude test data from release archives.
-    exclude:
-      - 'testdata/**'
 
 nfpms:
   - id: peekdb
