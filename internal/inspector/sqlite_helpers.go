@@ -127,3 +127,23 @@ func (r *sqliteItemReader) Close() error {
 	r.closed = true
 	return r.rows.Close()
 }
+
+// emptyItemReader is a zero-row ItemReader. It is returned by
+// Search when the table has no TEXT-affinity columns to LIKE
+// against, so the TUI shows "matched 0 rows" rather than an
+// error. It implements the same interface so the drain loop
+// in the TUI is unchanged.
+type emptyItemReader struct{}
+
+// Next always reports end-of-stream.
+func (*emptyItemReader) Next() bool { return false }
+
+// Scan returns an empty Row. Callers must not call Scan before
+// a successful Next; the TUI's readAllRows honors that.
+func (*emptyItemReader) Scan() Row { return Row{} }
+
+// Err is always nil.
+func (*emptyItemReader) Err() error { return nil }
+
+// Close is a no-op.
+func (*emptyItemReader) Close() error { return nil }
