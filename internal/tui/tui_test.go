@@ -1,13 +1,19 @@
 package tui
 
 import (
+	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	_ "modernc.org/sqlite"
+
+	"github.com/qiaozy1013/peekdb/internal/detect"
 	"github.com/qiaozy1013/peekdb/internal/inspector"
 )
 
@@ -347,3 +353,176 @@ func inspectorStats() inspector.Stats {
 		LockState: "",
 	}
 }
+
+// makeSearchTUIDB creates a small SQLite DB in t.TempDir() and
+// returns a fully-wired model with a real SQLiteInspector. Used
+// by the :search command tests. Duplicated from the inspector
+// test helpers (rather than exporting them) so the TUI tests
+// stay self-contained.
+func makeSearchTUIDB(t *testing.T) model {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tui-search.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	stmts := []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)`,
+		`INSERT INTO users (name, email) VALUES ('alice', 'a@example.com')`,
+		`INSERT INTO users (name, email) VALUES ('bob',   'b@example.com')`,
+		`INSERT INTO users (name, email) VALUES ('carol', 'c@example.com')`,
+	}
+	for _, s := range stmts {
+		if _, execErr := db.Exec(s); execErr != nil {
+			t.Fatalf("exec %q: %v", s, execErr)
+		}
+	}
+	insp, err := inspector.NewSQLite(path, inspector.Options{})
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	items, err := insp.Items()
+	if err != nil {
+		t.Fatalf("Items: %v", err)
+	}
+	return model{
+		ins:    insp,
+		items:  items,
+		ready:  true,
+		cursor: 0,
+		stats:  inspectorStats(),
+	}
+}
+
+func TestExecuteCommand_Search(t *testing.T) {
+	t.Run("hit", func(t *testing.T) {
+		m := makeSearchTUIDB(t)
+		defer func() { _ = m.ins.Close() }()
+		newM, _ := m.executeCommand("search alice")
+		fm := newM.(model)
+		if fm.currentName != "users" {
+			t.Errorf("currentName = %q, want users", fm.currentName)
+		}
+		if len(fm.contentLines) != 1 {
+			t.Errorf("contentLines = %d, want 1; got %+v", len(fm.contentLines), fm.contentLines)
+		}
+		if fm.err == nil || !strings.Contains(fm.err.Error(), "matched 1") {
+			t.Errorf("err should report matched 1; got %v", fm.err)
+		}
+		if !strings.Contains(fm.contentLines[0], "alice") {
+			t.Errorf("content line should contain 'alice'; got %q", fm.contentLines[0])
+		}
+	})
+	t.Run("multi_word_pattern", func(t *testing.T) {
+		m := makeSearchTUIDB(t)
+		defer func() { _ = m.ins.Close() }()
+		// "example.com" matches all 3 rows.
+		newM, _ := m.executeCommand("search example.com")
+		fm := newM.(model)
+		if len(fm.contentLines) != 3 {
+			t.Errorf("contentLines = %d, want 3", len(fm.contentLines))
+		}
+	})
+	t.Run("no_match", func(t *testing.T) {
+		m := makeSearchTUIDB(t)
+		defer func() { _ = m.ins.Close() }()
+		newM, _ := m.executeCommand("search zzzz_nope")
+		fm := newM.(model)
+		if len(fm.contentLines) != 0 {
+			t.Errorf("contentLines = %d, want 0", len(fm.contentLines))
+		}
+		if fm.err == nil || !strings.Contains(fm.err.Error(), "matched 0") {
+			t.Errorf("err should report matched 0; got %v", fm.err)
+		}
+	})
+	t.Run("missing_pattern", func(t *testing.T) {
+		m := makeSearchTUIDB(t)
+		defer func() { _ = m.ins.Close() }()
+		newM, _ := m.executeCommand("search")
+		fm := newM.(model)
+		if fm.err == nil || !strings.Contains(fm.err.Error(), "pattern") {
+			t.Errorf("err should mention pattern; got %v", fm.err)
+		}
+	})
+	t.Run("s_alias", func(t *testing.T) {
+		m := makeSearchTUIDB(t)
+		defer func() { _ = m.ins.Close() }()
+		newM, _ := m.executeCommand("s bob")
+		fm := newM.(model)
+		if len(fm.contentLines) != 1 {
+			t.Errorf(":s bob: contentLines = %d, want 1", len(fm.contentLines))
+		}
+	})
+}
+
+func TestExecuteCommand_Search_NonSQLiteRejected(t *testing.T) {
+	// Build a model whose inspector is NOT a *SQLiteInspector
+	// (we use the bbolt path of the inspector package). The
+	// command must refuse with a clear error, not panic.
+	//
+	// The fixture must be a real bbolt file (32 KiB, with
+	// bbolt's page header) — a 0-byte file is rejected by
+	// bbolt's read-only open with "bad file descriptor" on
+	// macOS. We copy the project's existing testdata/bbolt
+	// fixture rather than importing bbolt in the tui test
+	// (the tui package should not depend on a specific
+	// driver; the existing TestBolt_NewBolt uses the same
+	// fixture via findTestdata).
+	mk, closeFn := openBoltFixtureForTest(t)
+	defer closeFn()
+	m := model{
+		ins:    mk,
+		items:  []inspector.Item{{Name: "default", Kind: "bucket"}},
+		cursor: 0,
+		ready:  true,
+		stats:  inspectorStats(),
+	}
+	newM, _ := m.executeCommand("search alice")
+	fm := newM.(model)
+	if fm.err == nil {
+		t.Fatalf("expected :search on bbolt to set err; got nil")
+	}
+	if !strings.Contains(fm.err.Error(), "only implemented for SQLite") {
+		t.Errorf("err should mention SQLite limitation; got %v", fm.err)
+	}
+}
+
+// openBoltFixtureForTest copies the project's bbolt fixture
+// (testdata/bbolt/empty.db — a 32 KiB file with a real bbolt
+// page header) into t.TempDir() and opens it via
+// inspector.NewBolt. The returned closer must be called by
+// the caller.
+//
+// Why a copy and not a link: TempDir is cleaned up by the
+// testing framework, and we must not mutate the committed
+// fixture even accidentally. Why not os.WriteFile(path, nil, ...):
+// bbolt refuses to open a 0-byte file in read-only mode
+// (bbolt 1.3.10 has a separate "create empty file" bug on
+// Windows, and on macOS a zero-byte file fails with "bad
+// file descriptor" because the read-only open path still
+// needs to write the in-memory meta page).
+func openBoltFixtureForTest(t *testing.T) (inspector.Inspector, func()) {
+	t.Helper()
+	// Walk up to the project root from this test file. The
+	// tui test lives at internal/tui/tui_test.go, so the
+	// project root is two levels up.
+	fixture, readErr := os.ReadFile(filepath.Join("..", "..", "testdata", "bbolt", "empty.db"))
+	if readErr != nil {
+		t.Fatalf("read bbolt fixture: %v", readErr)
+	}
+	dst := filepath.Join(t.TempDir(), "x.bbolt")
+	if writeErr := os.WriteFile(dst, fixture, 0o600); writeErr != nil {
+		t.Fatalf("write bbolt fixture: %v", writeErr)
+	}
+	insp, openErr := inspector.NewBolt(dst, inspector.Options{})
+	if openErr != nil {
+		t.Fatalf("NewBolt: %v", openErr)
+	}
+	return insp, func() { _ = insp.Close() }
+}
+
+// detect import: keep it referenced so `goimports` does not
+// strip it from the import list when no other test uses it.
+var _ = detect.FormatSQLite

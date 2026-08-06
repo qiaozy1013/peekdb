@@ -320,10 +320,14 @@ func (s *SQLiteInspector) Query(sqlText string) (ItemReader, error) {
 }
 
 // queryRaw is the shared implementation behind OpenItem
-// and Query. It runs q against the database and returns
-// a sqliteItemReader.
-func (s *SQLiteInspector) queryRaw(q string) (ItemReader, error) {
-	rows, err := s.db.QueryContext(queryContext(s.options.Timeout), q)
+// and Query. It runs q (with optional parameterised args)
+// against the database and returns a sqliteItemReader.
+//
+// args is variadic so OpenItem / Query — which build static
+// strings — can keep their `s.queryRaw(q)` call shape; Search
+// passes its LIKE pattern as the single arg.
+func (s *SQLiteInspector) queryRaw(q string, args ...any) (ItemReader, error) {
+	rows, err := s.db.QueryContext(queryContext(s.options.Timeout), q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: query: %w", err)
 	}
@@ -334,6 +338,190 @@ func (s *SQLiteInspector) queryRaw(q string) (ItemReader, error) {
 	}
 	colTypes, _ := rows.ColumnTypes()
 	return newSQLiteItemReader(rows, cols, colTypes, s.options.Timeout), nil
+}
+
+// Search returns a streaming reader over the rows in the
+// named table/view where at least one TEXT-typed column
+// contains pattern as a case-insensitive substring.
+//
+// Like Query and OpenItem, Search is SQLite-specific and
+// lives on the concrete *SQLiteInspector; callers reach it
+// via type assertion (see cmd/query.go and internal/tui).
+//
+// Implementation notes:
+//
+//   - The user pattern is bound as a `?` parameter (gosec G201:
+//     user input never lands in a string-format SQL literal).
+//   - The table name and column names are identifiers, not
+//     values: SQLite does not let `?` stand in for an identifier,
+//     so they are string-interpolated after isValidSQLiteIdent
+//     validation (same defense-in-depth that OpenItem uses).
+//   - LIKE wildcards in the user pattern (`%`, `_`, `\`) are
+//     escaped to their literal forms and the query uses
+//     `ESCAPE '\\'` so a literal substring match is performed.
+//     Without escaping, a pattern like "50%" would match any
+//     row whose column starts with "50" — almost never what
+//     the user means.
+//   - Only TEXT-affinity columns participate. LIKE on INTEGER
+//     or BLOB coerces incorrectly or errors; we skip them by
+//     reading the column list via Schema() and filtering.
+//   - Case sensitivity follows SQLite's default LIKE rules:
+//     ASCII characters are case-insensitive, non-ASCII is
+//     case-sensitive (a documented SQLite quirk — we do not
+//     work around it in v0.2.0).
+//   - Returns the same *sqliteItemReader shape as OpenItem /
+//     Query, so the TUI's existing drain loop needs no changes.
+func (s *SQLiteInspector) Search(name, pattern string) (ItemReader, error) {
+	if !isValidSQLiteIdent(name) {
+		return nil, fmt.Errorf("sqlite: invalid table name %q", name)
+	}
+	if pattern == "" {
+		return nil, fmt.Errorf("sqlite: search pattern is empty")
+	}
+	// Verify the table actually exists. PRAGMA table_info is the
+	// normal way to read a table's columns, but it returns an
+	// empty result set (not an error) when the table is missing
+	// — so without this precheck a typo would silently look
+	// identical to "table exists but has no TEXT columns" and
+	// the user would see "matched 0 rows" with no hint.
+	exists, err := s.tableExists(name)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: search: lookup table: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("sqlite: search: table %q not found", name)
+	}
+	cols, err := s.Schema(name)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: search schema: %w", err)
+	}
+	textCols := filterTextColumns(cols)
+	if len(textCols) == 0 {
+		// No TEXT-affinity columns to search. Return an empty
+		// reader so the TUI shows "matched 0 rows" rather than
+		// an error — searching a numeric-only table is not a
+		// user error, just a no-op.
+		return &emptyItemReader{}, nil
+	}
+	q := buildSearchQuery(name, textCols)
+	args := buildSearchArgs(pattern, len(textCols))
+	return s.queryRaw(q, args...)
+}
+
+// filterTextColumns returns the subset of cols whose declared
+// SQLite type is TEXT-affinity (see isTextType for the rule).
+// BLOB, INTEGER, REAL, NUMERIC columns are excluded so the
+// LIKE only matches actual text data.
+func filterTextColumns(cols []Column) []Column {
+	out := make([]Column, 0, len(cols))
+	for _, c := range cols {
+		if isTextType(c.Type) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// buildSearchQuery returns the parameterised SQL for a
+// substring search over the TEXT columns of name. The
+// returned query has exactly len(textCols) `?` placeholders,
+// one per column, in the order textCols lists them. The
+// table name and column names are quoted identifiers; the
+// isValidSQLiteIdent guard in Search is what keeps the
+// interpolation safe — we add quote-doubling here as
+// defense-in-depth, matching the OpenItem pattern.
+func buildSearchQuery(name string, textCols []Column) string {
+	var b strings.Builder
+	b.Grow(64 * (len(textCols) + 1))
+	b.WriteString(`SELECT * FROM "`)
+	b.WriteString(quoteIdent(name))
+	b.WriteString(`" WHERE `)
+	for i, c := range textCols {
+		if i > 0 {
+			b.WriteString(" OR ")
+		}
+		b.WriteByte('"')
+		b.WriteString(quoteIdent(c.Name))
+		b.WriteString(`" LIKE ? ESCAPE '\'`)
+	}
+	return b.String()
+}
+
+// buildSearchArgs returns the n parameter values that match
+// the `?` placeholders in buildSearchQuery's output. Every
+// LIKE receives the same escaped pattern (one value per
+// placeholder); SQLite binds them in order.
+func buildSearchArgs(pattern string, n int) []any {
+	// Escape LIKE metacharacters in the user's pattern. Order
+	// matters: backslash first (so the escapes we add for `%`
+	// and `_` are not themselves escaped again).
+	likeArg := "%" + escapeLikePattern(pattern) + "%"
+	args := make([]any, n)
+	for i := range args {
+		args[i] = likeArg
+	}
+	return args
+}
+
+// quoteIdent returns s with every embedded double-quote
+// doubled, suitable for interpolating into a SQL string
+// literal that is delimited by double-quotes. SQLite parses
+// "" inside an identifier as a literal ".
+func quoteIdent(s string) string {
+	if !strings.ContainsRune(s, '"') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 4)
+	for _, r := range s {
+		if r == '"' {
+			b.WriteString(`""`)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// tableExists reports whether name is a known table or view
+// in the current schema. Implemented as a parameterised query
+// against sqlite_master so the user-supplied name is never
+// string-formatted into SQL.
+func (s *SQLiteInspector) tableExists(name string) (bool, error) {
+	row := s.db.QueryRowContext(queryContext(s.options.Timeout),
+		`SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ? LIMIT 1`,
+		name)
+	var x int
+	if err := row.Scan(&x); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// isTextType reports whether the SQLite declared type t is
+// a TEXT-affinity type — i.e. LIKE semantics are well-defined
+// for it. SQLite's affinity rules (sqlite.org/datatype3.html#type_affinity)
+// say a type is TEXT if its name contains "CHAR", "CLOB", or
+// "TEXT" (case-insensitive). We do not handle the edge case of
+// a type whose name contains both INT and CHAR (e.g. "INTCHAR")
+// — that would be a typo in a schema, not a real workload.
+func isTextType(t string) bool {
+	u := strings.ToUpper(t)
+	return strings.Contains(u, "CHAR") ||
+		strings.Contains(u, "CLOB") ||
+		strings.Contains(u, "TEXT")
+}
+
+// escapeLikePattern returns s with LIKE metacharacters (`%`,
+// `_`, `\`) escaped so a literal substring match is performed.
+// Must be paired with `ESCAPE '\'` in the LIKE clause.
+func escapeLikePattern(s string) string {
+	// Order matters: escape the escape char first.
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 // Schema returns the declared column definitions for a table
