@@ -461,12 +461,16 @@ func TestExecuteCommand_Search_NonSQLiteRejected(t *testing.T) {
 	// Build a model whose inspector is NOT a *SQLiteInspector
 	// (we use the bbolt path of the inspector package). The
 	// command must refuse with a clear error, not panic.
-	dir := t.TempDir()
-	bpath := filepath.Join(dir, "x.bbolt")
-	mk, closeFn, err := openBoltForTest(bpath)
-	if err != nil {
-		t.Fatalf("setup bbolt: %v", err)
-	}
+	//
+	// The fixture must be a real bbolt file (32 KiB, with
+	// bbolt's page header) — a 0-byte file is rejected by
+	// bbolt's read-only open with "bad file descriptor" on
+	// macOS. We copy the project's existing testdata/bbolt
+	// fixture rather than importing bbolt in the tui test
+	// (the tui package should not depend on a specific
+	// driver; the existing TestBolt_NewBolt uses the same
+	// fixture via findTestdata).
+	mk, closeFn := openBoltFixtureForTest(t)
 	defer closeFn()
 	m := model{
 		ins:    mk,
@@ -485,25 +489,38 @@ func TestExecuteCommand_Search_NonSQLiteRejected(t *testing.T) {
 	}
 }
 
-// openBoltForTest is a thin wrapper that returns an open
-// *BoltInspector. If the bbolt inspector is not registered
-// yet (it should be, via init() in production), the test
-// fails. The pair of (inspector, closeFn) keeps the t.Cleanup
-// wiring local to the test.
-func openBoltForTest(path string) (inspector.Inspector, func(), error) {
-	// NewBolt requires the file to exist (it stats first to
-	// refuse directories). Touch an empty file so the open
-	// proceeds; we do not need a meaningful bbolt for this
-	// test — only an inspector whose concrete type is NOT
-	// *SQLiteInspector, so :search's type assertion fails.
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
-		return nil, nil, err
+// openBoltFixtureForTest copies the project's bbolt fixture
+// (testdata/bbolt/empty.db — a 32 KiB file with a real bbolt
+// page header) into t.TempDir() and opens it via
+// inspector.NewBolt. The returned closer must be called by
+// the caller.
+//
+// Why a copy and not a link: TempDir is cleaned up by the
+// testing framework, and we must not mutate the committed
+// fixture even accidentally. Why not os.WriteFile(path, nil, ...):
+// bbolt refuses to open a 0-byte file in read-only mode
+// (bbolt 1.3.10 has a separate "create empty file" bug on
+// Windows, and on macOS a zero-byte file fails with "bad
+// file descriptor" because the read-only open path still
+// needs to write the in-memory meta page).
+func openBoltFixtureForTest(t *testing.T) (inspector.Inspector, func()) {
+	t.Helper()
+	// Walk up to the project root from this test file. The
+	// tui test lives at internal/tui/tui_test.go, so the
+	// project root is two levels up.
+	fixture, readErr := os.ReadFile(filepath.Join("..", "..", "testdata", "bbolt", "empty.db"))
+	if readErr != nil {
+		t.Fatalf("read bbolt fixture: %v", readErr)
 	}
-	insp, err := inspector.NewBolt(path, inspector.Options{})
-	if err != nil {
-		return nil, nil, err
+	dst := filepath.Join(t.TempDir(), "x.bbolt")
+	if writeErr := os.WriteFile(dst, fixture, 0o600); writeErr != nil {
+		t.Fatalf("write bbolt fixture: %v", writeErr)
 	}
-	return insp, func() { _ = insp.Close() }, nil
+	insp, openErr := inspector.NewBolt(dst, inspector.Options{})
+	if openErr != nil {
+		t.Fatalf("NewBolt: %v", openErr)
+	}
+	return insp, func() { _ = insp.Close() }
 }
 
 // detect import: keep it referenced so `goimports` does not
